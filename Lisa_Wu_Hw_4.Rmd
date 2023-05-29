@@ -1,0 +1,133 @@
+---
+title: "Lisa_Wu_HW_4"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(arrow)
+library(ggplot2)
+library(broom)
+```
+
+## Setting up the data
+```{r import saved data, echo=FALSE}
+data_path <- "/Users/lisawu/Downloads/"
+applications <- read_parquet(paste0(data_path,"exercise_3_applications.parquet"))
+
+applications
+```
+
+## create workgroup, clear the NAs in examiner_id
+```{r workgroup}
+applications <- applications %>%
+  mutate(wg = (floor(examiner_art_unit / 10) * 10)) %>%
+  mutate(appl_status_date = dmy_hms(appl_status_date)) %>%
+  mutate(year = year(appl_status_date)) %>%
+  filter(year <= 2017) %>%
+  drop_na(examiner_id) 
+```
+
+  
+## create a new dataframe shows examiner_id, examiner_art_unit, race, year,tc,and wg. Also, drop all NAs in gender and renamed examiner_id as id, and examiner_art_unit as art unit
+```{r data-2}
+examiners <- applications %>%
+  group_by(examiner_id, examiner_art_unit, year) %>%
+  drop_na(gender) %>%
+  rename(id = examiner_id, art_unit = examiner_art_unit) %>%
+  summarise( 
+    gender = first(gender),
+    race = first(race),
+    year = first(year),
+    tc = first(tc),
+    wg = first(wg)
+    )
+```
+# ```{r print}
+# write_csv(examiners, "applications_cleaned.csv")
+# ```
+
+## show relationship between tc vs gender 
+```{r compare-tcs-by-gender}
+library(ggplot2)
+plots <- lapply(unique(examiners$tc), function(tc_value) {
+  subset_df <- subset(examiners, tc == tc_value)
+  filtered_df <- subset_df[!duplicated(subset_df$id), ]
+  ggplot(subset_df, aes(x = factor(year), fill = gender)) +
+    geom_bar(position="fill") +
+    labs(x = "Year", y = "Frequency", fill = "Gender") +
+    scale_fill_manual(values = c("blue", "pink")) +
+    ggtitle(paste("TC:", tc_value))
+})
+
+# Set the layout to a 2x2 grid
+layout(matrix(1:4, nrow = 2, ncol = 2))
+
+# Plot each histogram in a separate panel
+for (i in 1:4) {
+  plot(plots[[i]])
+}
+```
+
+
+## show relationship between workgroup vs gender 
+```{r compare-workgroups-by-gender}
+library(dplyr)
+library(tidyr)
+# Subset the dataframe for tc = 1600
+subset_data <- subset(examiners, tc == 1600)
+# Filter out unique wg values
+wg_values <- sort(unique(subset_data$wg))
+# Generate individual plots for each wg value
+for (wg_value in wg_values) {
+  # Subset the data for the current wg value
+  subset_data_wg <- subset(subset_data, wg == wg_value)
+  # Create a new dataframe with counts for each combination of year and gender
+  counts <- with(subset_data_wg, table(year, gender))
+  # Convert the counts dataframe to long format
+  counts_long <- as.data.frame.table(counts)
+  # Convert "year" to numeric
+  counts_long$year <- as.numeric(as.character(counts_long$year))
+  # Expand the data to include all years from 2000 to 2017
+  counts_long <- counts_long %>%
+    complete(year = min(year):max(year), nesting(gender), fill = list(Freq = 0))
+  # Generate the bar plot
+  plot <- ggplot(counts_long, aes(x = factor(year), y = Freq, fill = gender)) +
+    geom_bar(stat = "identity", position = "fill") +
+    scale_fill_manual(values = c("female" = "steelblue", "male" = "orange")) +
+    labs(x = "Year", y = "Gender Count", fill = "Gender", title = paste("Workgroup", wg_value)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  # Save the plot as an individual file (optional)
+  ggsave(filename = paste("workgroup", wg_value, ".png", sep = ""), plot = plot)
+  # Display the plot
+  print(plot)
+}
+
+```
+
+## show relationship between art_units vs gender 
+```{r compare-art_units-and-gender}
+
+# Select the necessary variables from the examiners dataframe
+subset_data <- select(examiners, art_unit, gender, year)
+
+# ratio of gender for each art unit in each year
+au_year_ratio <- subset_data %>% 
+  group_by(year, art_unit) %>% 
+  summarise(percent_female = sum(gender=="female",na.rm = TRUE)/n())
+
+# average ratio of gender across 17 years for each art unit
+au_ratio <- au_year_ratio %>% 
+  group_by(art_unit) %>% 
+  summarise(average_percent_female= mean(percent_female))
+
+# create a new graph
+graph <- ggplot(data=au_ratio) +
+  geom_col(aes(as.factor(x=art_unit), y = average_percent_female)) 
+
+graph
+
+```
+
